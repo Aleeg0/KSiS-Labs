@@ -10,6 +10,10 @@ obj/
 *.exe
 *.pdb
 *.nuget
+*.cache/
+*.log
+*.tmp
+*.csproj.user
 
 # Rider project settings
 .idea/
@@ -25,6 +29,10 @@ obj/
 *.userosscache
 *.suo
 *.userprefs
+*.rsuser
+*.sln.DotSettings
+*.sln.DotSettings.user
+*.sln.DotSettings.global
 
 # Logs, database, config
 *.log
@@ -32,14 +40,22 @@ obj/
 *.db
 *.config
 *.ldb
+*.cache/
+*.sqlite
 
-# Visual Studio cache
+# Visual Studio & VS Code
 .vscode/
 .vs/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln.docstates
+*.code-workspace
 
 # NuGet
 *.nupkg
 .nuget/
+packages/
 
 # Coverage results
 coverage/
@@ -62,3 +78,12 @@ desktop.ini
 # Rider caches
 .idea/
 out/
+
+# Publish output
+publish/
+app.publish/
+
+# Windows Forms auto-generated files
+*.Designer.cs
+*.resx
+*.resources
