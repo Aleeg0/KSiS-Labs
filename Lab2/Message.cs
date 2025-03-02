@@ -1,6 +1,6 @@
 ﻿namespace Lab2;
 
-public record Message
+public class Message
 {
     private readonly DateTime _time;
     private readonly string _username;

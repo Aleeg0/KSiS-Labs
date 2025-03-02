@@ -1,6 +1,6 @@
 ﻿namespace Lab2;
 
-partial class Form1
+partial class Main
 {
     /// <summary>
     ///  Required designer variable.
@@ -31,13 +31,14 @@ partial class Form1
     {
         SuspendLayout();
         // 
-        // Form1
+        // Main
         // 
-        AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
-        AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+        AutoScaleDimensions = new System.Drawing.SizeF(96F, 96F);
+        AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
         ClientSize = new System.Drawing.Size(794, 485);
-        MinimumSize = new System.Drawing.Size(512, 500);
+        MinimumSize = new System.Drawing.Size(532, 520);
         Text = "Form1";
+        FormClosed += Main_FormClosed;
         ResumeLayout(false);
     }
 

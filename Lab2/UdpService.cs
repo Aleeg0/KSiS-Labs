@@ -6,12 +6,14 @@ namespace Lab2;
 
 public class UdpService
 {
+    private const int PackageCount = 3;
+    private const int Сalldown = 250;
     private const int UdpPortReceive = 5000;
-    private const int UdpPortSend = 54000;
-    private readonly IPAddress _broadcast = IPAddress.Parse("192.168.100.255");
     private readonly UdpClient _sendClient;
+    private UdpClient _receiveClient;
     private Dictionary<IPAddress, string> _userTable;
     private readonly UserData _user;
+    private readonly CancellationTokenSource _cts;
     
     public event Action<IPAddress>? UserDiscovered;
 
@@ -19,42 +21,48 @@ public class UdpService
     {
         _user = user;
         _userTable = userTable;
-        _sendClient = new UdpClient(UdpPortSend);
+        _sendClient = new UdpClient(new IPEndPoint(_user.ipAddress,0));
+        _receiveClient = new(new IPEndPoint(IPAddress.Any, UdpPortReceive));
+        _sendClient.EnableBroadcast = true;
+        _cts = new CancellationTokenSource();
     }
-
 
     public async Task ListenBroadcastAsync()
     {
-        using UdpClient receiverClient = new UdpClient(new IPEndPoint(IPAddress.Any, UdpPortReceive));
-        while (true)
+        while (!_cts.IsCancellationRequested)
         {
             try
             {
-                // получить сообщение
-                var receiveMessage = await receiverClient.ReceiveAsync();
+                var receiveMessage = await _receiveClient.ReceiveAsync();
                 byte[] message = receiveMessage.Buffer;
                 IPAddress ipAddress = receiveMessage.RemoteEndPoint.Address;
-        
+
                 #if DEBUG
                     Console.WriteLine($"{ipAddress} receive message.");
                 #endif
-                
-                // отсеять повторные пакеты и loopback
+
+                // Отсеять повторные пакеты и loopback
                 if (ipAddress.Equals(_user.ipAddress) || _userTable.ContainsKey(ipAddress))
                     continue;
-                
-                // проверим контрольную сумму
+
+                // Проверим контрольную сумму
                 if (!PackageTools.ApproveChecksum(message)) throw new Exception("Invalid checksum");
-        
-                // по типу вызывать метод обработчик
+
+                // Обрабатываем сообщение по типу
                 MessageType type = PackageTools.GetMessageType(message);
                 switch (type)
                 {
                     case MessageType.UDP_BROADCAST_REQUEST:
+                    {
                         await HandleRequestAsync(PackageTools.GetBody(message), ipAddress);
+                        Console.WriteLine("Received UDP BROADCAST_REQUEST");
+                    }
                         break;
                     case MessageType.UDP_BROADCAST_RESPONSE:
+                    {
                         HandleResponseAsync(PackageTools.GetBody(message), ipAddress);
+                        Console.WriteLine("Received UDP BROADCAST_RESPONSE");
+                    }
                         break;
                     default:
                         throw new Exception("Invalid type");
@@ -63,15 +71,53 @@ public class UdpService
             catch (SocketException e)
             {
                 Console.WriteLine(e);
+                break;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
             }
         }
     }
+
+
+    public async Task SendBroadcastAsync()
+    {
+        byte[] resBody = PackageTools.FormUserInfoBody(_user.username);
+        byte[] datagram = PackageTools.FormDatagram(MessageType.UDP_BROADCAST_REQUEST, resBody);
+        for (int i = 0; i < PackageCount; i++)
+        {
+            await SendAsync(datagram, new IPEndPoint(IPAddress.Broadcast, UdpPortReceive));
+            await Task.Delay(Сalldown);
+        }
+    }
+
+    public void Disable()
+    {
+        if (_cts.IsCancellationRequested) return;
+        
+        #if DEBUG
+            Console.WriteLine("Shutting down UPD service...");
+        #endif
+        
+        _cts.Cancel();
+        
+        _receiveClient.Close();
+        
+        _sendClient.Close();
+        
+        #if DEBUG
+            Console.WriteLine("UDP service stopped.");
+        #endif
+        
+    }
     
-    async Task HandleRequestAsync(byte[] reqBody, IPAddress address)
+    private async Task HandleRequestAsync(byte[] reqBody, IPAddress address)
     {
         // записываем в таблицу информацию
         string username = Encoding.UTF8.GetString(reqBody);
-        _userTable.Add(address, username);
+        _userTable.TryAdd(address, username);
+
         
         // формируем пакет для response
         byte[] resBody = PackageTools.FormUserInfoBody(_user.username);
@@ -81,25 +127,19 @@ public class UdpService
         await SendAsync(datagram, new IPEndPoint(address, UdpPortReceive));
     }
 
-    void HandleResponseAsync(byte[] resBody, IPAddress address)
+    private void HandleResponseAsync(byte[] resBody, IPAddress address)
     {
         // записываем в таблицу информацию
         string username = Encoding.UTF8.GetString(resBody);
-        _userTable.Add(address, username);
+        _userTable.TryAdd(address, username);
+
         
         // тригерим tcp server
         UserDiscovered?.Invoke(address);
     }
 
-    public async Task SendBroadcastAsync()
+    private async Task SendAsync(byte[] datagram, IPEndPoint endPoint)
     {
-        byte[] resBody = PackageTools.FormUserInfoBody(_user.username);
-        byte[] datagram = PackageTools.FormDatagram(MessageType.UDP_BROADCAST_REQUEST, resBody);
-        await SendAsync(datagram, new IPEndPoint(_broadcast, UdpPortReceive));
-    }
-
-    private async Task<int> SendAsync(byte[] datagram, IPEndPoint endPoint)
-    {
-        return await _sendClient.SendAsync(datagram, datagram.Length, endPoint);
+        await _sendClient.SendAsync(datagram, datagram.Length, endPoint);
     }
 }

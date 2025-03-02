@@ -46,6 +46,20 @@ public static class PackageTools
     
         return memoryStream.ToArray();
     }
+
+    public static byte[] FormHistoryMessage(Message message)
+    {
+        using MemoryStream memoryStream = new MemoryStream(TimeSize + message.Text.Length * 2);
+        using BinaryWriter writer = new BinaryWriter(memoryStream, Encoding.UTF8);
+    
+        writer.Write(message.Time.Ticks);
+        byte[] username = Encoding.UTF8.GetBytes(message.Username);
+        writer.Write(username.Length);
+        writer.Write(username);
+        writer.Write(Encoding.UTF8.GetBytes(message.Text));
+    
+        return memoryStream.ToArray();
+    }
     
     public static bool ApproveChecksum(byte[] datagram)
     {

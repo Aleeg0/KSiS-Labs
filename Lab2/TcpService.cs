@@ -9,37 +9,40 @@ public class TcpService
     private const int SynMessageOffset = 2;
     private const int TcpPortReceive = 5001;
     private const int TcpPortSend = 54001;
-    private readonly TcpClient _sendClient;
     private readonly UserData _user;
     private List<TcpClient> _clients;
     private List<Message> _messages;
     private Dictionary<IPAddress, string> _userTable;
+    private TcpListener _tcpListener;
+    private readonly CancellationTokenSource _cts;
     
     public event Action<string>? MessageReceived;
+    public event Action? OnConnect;
 
     public TcpService(UserData user, List<Message> messages, Dictionary<IPAddress, string> userTable)
     {
          _user = user;
-        _sendClient = new TcpClient();
         _clients = new List<TcpClient>();
         _messages = messages;
         _userTable = userTable;
+        _tcpListener = new TcpListener(new IPEndPoint(_user.ipAddress, TcpPortReceive));
+        _cts = new CancellationTokenSource();
     }
 
 
     public async Task ListenAsync()
     {
         // инициализируем прослушивателя
-        using TcpListener tcpListener = new TcpListener(new IPEndPoint(_user.ipAddress, TcpPortReceive));
-        tcpListener.Start();
+        _tcpListener.Start();
+        // инициализируем рандомайзер
         Random random = new Random();
 
-        while (true)
+        while (!_cts.IsCancellationRequested)
         {
             try
             {
                 // принимаем запросы от пользователей
-                TcpClient tcpClient = await tcpListener.AcceptTcpClientAsync();
+                TcpClient tcpClient = await _tcpListener.AcceptTcpClientAsync();
                 IPEndPoint clientEndPoint = (IPEndPoint)tcpClient.Client.RemoteEndPoint!;
                 
                 #if DEBUG
@@ -59,6 +62,8 @@ public class TcpService
                     throw new Exception("The message has been corrupted or intercepted!");
                 // добавляем клиента в общий список клиентов
                 _clients.Add(tcpClient);
+                // тригерим ивент перезаписи списка подключенных
+                OnConnect?.Invoke();
                 // если все хорошо, запускаем таску с сообщениями
                 _ = Task.Run(() => ProceedDialogMessages(tcpClient));
             }
@@ -92,6 +97,8 @@ public class TcpService
             await SendMessageAsync(tcpClient, datagram);
             // добавляем клиента в общий список клиентов
             _clients.Add(tcpClient);
+            // тригерим ивент перезаписи списка подключенных
+            OnConnect?.Invoke();
             // если все хорошо, запускаем таску с сообщениями
             _ = Task.Run(() => ProceedDialogMessages(tcpClient));
         }
@@ -105,6 +112,28 @@ public class TcpService
         }
     }
 
+    public async Task SendJoinMessage(Message message)
+    {
+        try
+        {
+            // переводи сообщение в байты
+            byte[] datagram = PackageTools.FormDatagram(
+                MessageType.TCP_JOIN, 
+                PackageTools.FormDialogMessage(message)
+            );
+            // отправляем созданное сообщение
+            await SendMessageAsync(_clients[^1], datagram);
+        }
+        catch (SocketException e)
+        {
+            Console.WriteLine(e);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+        }
+    }
+    
     public async Task RequestHistoryAsync()
     {
         byte[] datagram = PackageTools.FormDatagram(MessageType.TCP_HISTORY_REQUEST, []);
@@ -118,12 +147,11 @@ public class TcpService
         }
     }
     
-    public async Task SendDialogMessageAsync(Message message)
+    public async Task SendDialogMessageAsync(Message message, MessageType type)
     {
         // формируем сообщение
-        byte[] datagram = PackageTools.FormDatagram(MessageType.TCP_DIALOG, PackageTools.FormDialogMessage(message));
+        byte[] datagram = PackageTools.FormDatagram(type, PackageTools.FormDialogMessage(message));
         
-        List<TcpClient> disconnectedClients = new List<TcpClient>();
         // по каждому проходимся отправляем сообщение
         foreach (var client in _clients)
         {
@@ -133,21 +161,34 @@ public class TcpService
                 {
                     await SendMessageAsync(client, datagram);
                 }
-                else
-                {
-                    disconnectedClients.Add(client);
-                }
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Failed to send message to {client.Client.RemoteEndPoint}: {e.Message}");
-                disconnectedClients.Add(client);
             }
         }
-        foreach (var client in disconnectedClients)
-        {
-            _clients.Remove(client);
-        }
+    }
+
+    public void Disable()
+    {
+        if (_cts.IsCancellationRequested) return;
+        
+        #if DEBUG
+            Console.WriteLine("Shutting down TCP service...");
+        #endif
+        
+        // отключаем tcpListener 
+        _cts.Cancel();
+        // закрываем прослушивателя
+        _tcpListener.Stop();
+        // очищаем массив клиентов
+        _clients.Clear();
+        // очищаем таблицу
+        _userTable.Clear();
+
+        #if DEBUG
+            Console.WriteLine("TCP service stopped.");
+        #endif
     }
 
     async Task<int> SendMessageAsync(TcpClient tcpClient, byte[] datagram)
@@ -179,88 +220,93 @@ public class TcpService
     
     void ProceedDialogMessages(TcpClient tcpClient)
     {
-        try
+        // получаем IpV4
+        IPAddress clientIp = NetworkTools.GetIpV4(tcpClient.Client.RemoteEndPoint!);
+        
+        #if DEBUG
+            Console.WriteLine($"Start handling messages from {clientIp}");
+        #endif
+        
+        try 
         {
-            // получаем IpV4
-            IPAddress clientIp = NetworkTools.GetIpV4(tcpClient.Client.RemoteEndPoint!);
-            
-            #if DEBUG
-                Console.WriteLine($"Start handling messages from {clientIp}");
-            #endif
-            
-            try 
+            NetworkStream stream = tcpClient.GetStream();
+            using BinaryReader reader = new BinaryReader(stream, Encoding.UTF8, true);
+
+            // запускаем цикл пока подключены на прослушку сообщений
+            while (tcpClient.Connected)
             {
-                NetworkStream stream = tcpClient.GetStream();
-                using BinaryReader reader = new BinaryReader(stream, Encoding.UTF8);
+                byte[] header = reader.ReadBytes(PackageTools.DatagramHeaderSize);
+                // проверяем на валидность
+                if (!PackageTools.ApproveChecksum(header)) continue;
 
-                // запускаем цикл пока подключены на прослушку сообщений
-                while (tcpClient.Connected)
+                switch (PackageTools.GetMessageType(header))
                 {
-                    byte[] header = reader.ReadBytes(PackageTools.DatagramHeaderSize);
-                    // проверяем на валидность
-                    if (!PackageTools.ApproveChecksum(header)) continue;
-
-                    switch (PackageTools.GetMessageType(header))
+                    case MessageType.TCP_DIALOG:
                     {
-                        case MessageType.TCP_DIALOG:
-                        {
-                            HandleDialogMessage(
-                                reader, 
-                                PackageTools.GetMessageLength(header),
-                                clientIp
-                            );
-                        }
-                            break;
-                        case MessageType.TCP_HISTORY_REQUEST:
-                        {
-                            _ = Task.Run(() => HandleHistoryRequest(tcpClient));
-                        }
-                            break;
-                        case MessageType.TCP_HISTORY_RESPONSE:
-                        {
-                            HandleHistoryResponse(
-                                reader, 
-                                PackageTools.GetMessageLength(header),
-                                clientIp
-                            );
-                            
-                        }
-                            break;
+                        HandleDialogMessage(
+                            reader, 
+                            PackageTools.GetMessageLength(header),
+                            clientIp
+                        );
                     }
+                        break;
+                    case MessageType.TCP_JOIN:
+                    {
+                        HandleDialogMessage(
+                            reader, 
+                            PackageTools.GetMessageLength(header),
+                            clientIp
+                        );
+                    }
+                        break;
+                    case MessageType.TCP_HISTORY_REQUEST:
+                    {
+                        _ = Task.Run(async () => await HandleHistoryRequest(tcpClient));
+                    }
+                        break;
+                    case MessageType.TCP_HISTORY_RESPONSE:
+                    {
+                        HandleHistoryResponse(
+                            reader,
+                            PackageTools.GetMessageLength(header)
+                        );
+                    }
+                        break;
+                    case MessageType.TCP_DISCONNECT:
+                    {
+                        HandleDialogMessage(
+                            reader, 
+                            PackageTools.GetMessageLength(header),
+                            clientIp
+                        );
+                        // корректно закрываем поток
+                        tcpClient.Close();
+                        tcpClient.Dispose();
+                        // удаляем из активных пользователей
+                        _clients.Remove(tcpClient);
+                        // удаляем из таблицы информацию
+                        _userTable.Remove(clientIp);
+                        // тригерим ивент перезаписи списка подключенных
+                        OnConnect?.Invoke();
+                    }
+                        break;
                 }
             }
-            catch (SocketException e)
-            {
-                Console.WriteLine(e);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine(e);
-            }
-            // как только отключились, корректно закрываем поток
-            finally
-            {
-                tcpClient.Close();
-                // удаляем из активных пользователей
-                _clients.Remove(tcpClient);
-                // удаляем из таблицы информацию
-                _userTable.Remove(clientIp);
-                
-                #if DEBUG
-                    Console.WriteLine($"user with ip {clientIp} closed.");
-                #endif
-            }
         }
-        catch (Exception)
+        catch (IOException)
         {
-            Console.WriteLine("Connection error");
+            Console.WriteLine($"Client {clientIp} disconnected.");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
         }
     }
 
     void HandleDialogMessage(BinaryReader reader, ushort messageLength, IPAddress clientIp)
     {
         // Читаем время
-        DateTime time = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
+        DateTime time = new DateTime(reader.ReadInt64(), DateTimeKind.Local);
         // Читаем диалоговое сообщение
         byte[] textBytes = reader.ReadBytes(messageLength - PackageTools.TimeSize);
         string text = Encoding.UTF8.GetString(textBytes);
@@ -274,39 +320,56 @@ public class TcpService
 
     async Task HandleHistoryRequest(TcpClient tcpClient)
     {
-        
-        byte[] datagram;
-        // отправляем сообщения
-        foreach (var message in _messages)
+        try
         {
+            byte[] datagram;
+            // отправляем сообщения
+            foreach (var message in _messages)
+            {
+                datagram = PackageTools.FormDatagram(
+                    MessageType.TCP_HISTORY_RESPONSE,
+                    PackageTools.FormHistoryMessage(message)
+                );
+                if (tcpClient.Connected)
+                    await SendMessageAsync(tcpClient, datagram);
+            }
+            // формируем заключительное сообщение
             datagram = PackageTools.FormDatagram(
                 MessageType.TCP_HISTORY_RESPONSE,
-                PackageTools.FormDialogMessage(message)
+                [0]
             );
-            await SendMessageAsync(tcpClient, datagram);
+            // отправляем заключительное сообщение
+            if (tcpClient.Connected)
+                await SendMessageAsync(tcpClient, datagram);
         }
-        // формируем заключительное сообщение
-        datagram = PackageTools.FormDatagram(
-            MessageType.TCP_HISTORY_RESPONSE,
-            [0]
-        );
-        // отправляем заключительное сообщение
-        await SendMessageAsync(tcpClient, datagram);
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+        }
     }
     
-    void HandleHistoryResponse(BinaryReader reader, ushort messageLength, IPAddress clientIp)
+    void HandleHistoryResponse(BinaryReader reader, ushort messageLength)
     {
         // если было доставлено конечное сообщение
-        if (messageLength == 1) return;
+        if (messageLength == 1 && reader.ReadByte() == 0) return;
         
         // Читаем время
-        DateTime time = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
+        DateTime time = new DateTime(reader.ReadInt64(), DateTimeKind.Local);
+        
+        // Читаем размер имя пользователя
+        int usernameLen = reader.ReadInt32();
+        // Читаем имя пользователя
+        byte[] usernameBytes = reader.ReadBytes(usernameLen);
+        // декодируем имя
+        string username = Encoding.UTF8.GetString(usernameBytes);
+        
         // Читаем диалоговое сообщение
-        byte[] textBytes = reader.ReadBytes(messageLength - PackageTools.TimeSize);
+        byte[] textBytes = reader.ReadBytes(messageLength - PackageTools.TimeSize - usernameLen - 4);
         string text = Encoding.UTF8.GetString(textBytes);
-        string username = _userTable[clientIp];
+        
         // формируем сообщение
         Message receivedMessage = new Message(username, text, time);
+        
         // проверяем не было ли уже получено такого сообщения,
         // если не существует, добавляем
         if (!_messages.Exists((message) => 

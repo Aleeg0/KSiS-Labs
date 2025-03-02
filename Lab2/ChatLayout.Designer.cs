@@ -62,7 +62,7 @@ partial class ChatLayout
         p_chat.Dock = System.Windows.Forms.DockStyle.Fill;
         p_chat.Location = new System.Drawing.Point(0, 0);
         p_chat.Name = "p_chat";
-        p_chat.Size = new System.Drawing.Size(496, 462);
+        p_chat.Size = new System.Drawing.Size(510, 480);
         p_chat.TabIndex = 0;
         // 
         // p_topBar
@@ -72,7 +72,7 @@ partial class ChatLayout
         p_topBar.Location = new System.Drawing.Point(0, 0);
         p_topBar.Margin = new System.Windows.Forms.Padding(0);
         p_topBar.Name = "p_topBar";
-        p_topBar.Size = new System.Drawing.Size(325, 385);
+        p_topBar.Size = new System.Drawing.Size(331, 403);
         p_topBar.TabIndex = 2;
         // 
         // tb_dialog
@@ -82,8 +82,9 @@ partial class ChatLayout
         tb_dialog.Location = new System.Drawing.Point(0, 0);
         tb_dialog.Multiline = true;
         tb_dialog.Name = "tb_dialog";
+        tb_dialog.ReadOnly = true;
         tb_dialog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-        tb_dialog.Size = new System.Drawing.Size(325, 385);
+        tb_dialog.Size = new System.Drawing.Size(331, 403);
         tb_dialog.TabIndex = 0;
         // 
         // p_bottomBar
@@ -92,17 +93,17 @@ partial class ChatLayout
         p_bottomBar.Controls.Add(btn_send);
         p_bottomBar.Controls.Add(tb_message);
         p_bottomBar.Dock = System.Windows.Forms.DockStyle.Bottom;
-        p_bottomBar.Location = new System.Drawing.Point(0, 385);
+        p_bottomBar.Location = new System.Drawing.Point(0, 403);
         p_bottomBar.Margin = new System.Windows.Forms.Padding(0);
         p_bottomBar.Name = "p_bottomBar";
-        p_bottomBar.Size = new System.Drawing.Size(325, 77);
+        p_bottomBar.Size = new System.Drawing.Size(331, 77);
         p_bottomBar.TabIndex = 1;
         // 
         // btn_send
         // 
         btn_send.Anchor = System.Windows.Forms.AnchorStyles.None;
         btn_send.Font = new System.Drawing.Font("Century Gothic", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)204));
-        btn_send.Location = new System.Drawing.Point(262, 11);
+        btn_send.Location = new System.Drawing.Point(265, 11);
         btn_send.Name = "btn_send";
         btn_send.Size = new System.Drawing.Size(52, 55);
         btn_send.TabIndex = 1;
@@ -114,7 +115,7 @@ partial class ChatLayout
         // 
         tb_message.Anchor = System.Windows.Forms.AnchorStyles.None;
         tb_message.Font = new System.Drawing.Font("Century Gothic", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)204));
-        tb_message.Location = new System.Drawing.Point(6, 10);
+        tb_message.Location = new System.Drawing.Point(9, 10);
         tb_message.Multiline = true;
         tb_message.Name = "tb_message";
         tb_message.Size = new System.Drawing.Size(250, 57);
@@ -128,10 +129,10 @@ partial class ChatLayout
         p_rightBar.Controls.Add(p_leaveButton);
         p_rightBar.Controls.Add(p_userInfo);
         p_rightBar.Dock = System.Windows.Forms.DockStyle.Right;
-        p_rightBar.Location = new System.Drawing.Point(325, 0);
+        p_rightBar.Location = new System.Drawing.Point(331, 0);
         p_rightBar.Margin = new System.Windows.Forms.Padding(0);
         p_rightBar.Name = "p_rightBar";
-        p_rightBar.Size = new System.Drawing.Size(171, 462);
+        p_rightBar.Size = new System.Drawing.Size(179, 480);
         p_rightBar.TabIndex = 0;
         // 
         // p_otherUsers
@@ -139,10 +140,10 @@ partial class ChatLayout
         p_otherUsers.BackColor = System.Drawing.Color.Gainsboro;
         p_otherUsers.Controls.Add(lb_users);
         p_otherUsers.Dock = System.Windows.Forms.DockStyle.Fill;
-        p_otherUsers.Location = new System.Drawing.Point(0, 81);
+        p_otherUsers.Location = new System.Drawing.Point(0, 95);
         p_otherUsers.Margin = new System.Windows.Forms.Padding(0);
         p_otherUsers.Name = "p_otherUsers";
-        p_otherUsers.Size = new System.Drawing.Size(171, 324);
+        p_otherUsers.Size = new System.Drawing.Size(179, 328);
         p_otherUsers.TabIndex = 2;
         // 
         // lb_users
@@ -151,7 +152,7 @@ partial class ChatLayout
         lb_users.Font = new System.Drawing.Font("Century Gothic", 11.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)204));
         lb_users.Location = new System.Drawing.Point(0, 0);
         lb_users.Name = "lb_users";
-        lb_users.Size = new System.Drawing.Size(171, 324);
+        lb_users.Size = new System.Drawing.Size(179, 328);
         lb_users.TabIndex = 0;
         lb_users.Text = "Пользователи:";
         lb_users.TextAlign = System.Drawing.ContentAlignment.TopCenter;
@@ -160,10 +161,10 @@ partial class ChatLayout
         // 
         p_leaveButton.Controls.Add(btn_leave);
         p_leaveButton.Dock = System.Windows.Forms.DockStyle.Bottom;
-        p_leaveButton.Location = new System.Drawing.Point(0, 405);
+        p_leaveButton.Location = new System.Drawing.Point(0, 423);
         p_leaveButton.Margin = new System.Windows.Forms.Padding(0);
         p_leaveButton.Name = "p_leaveButton";
-        p_leaveButton.Size = new System.Drawing.Size(171, 57);
+        p_leaveButton.Size = new System.Drawing.Size(179, 57);
         p_leaveButton.TabIndex = 1;
         // 
         // btn_leave
@@ -175,6 +176,7 @@ partial class ChatLayout
         btn_leave.TabIndex = 0;
         btn_leave.Text = "leave";
         btn_leave.UseVisualStyleBackColor = true;
+        btn_leave.Click += btn_leave_Click;
         // 
         // p_userInfo
         // 
@@ -184,7 +186,7 @@ partial class ChatLayout
         p_userInfo.Location = new System.Drawing.Point(0, 0);
         p_userInfo.Margin = new System.Windows.Forms.Padding(0);
         p_userInfo.Name = "p_userInfo";
-        p_userInfo.Size = new System.Drawing.Size(171, 81);
+        p_userInfo.Size = new System.Drawing.Size(179, 95);
         p_userInfo.TabIndex = 0;
         // 
         // lb_info
@@ -193,7 +195,7 @@ partial class ChatLayout
         lb_info.Font = new System.Drawing.Font("Century Gothic", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)204));
         lb_info.Location = new System.Drawing.Point(0, 0);
         lb_info.Name = "lb_info";
-        lb_info.Size = new System.Drawing.Size(171, 81);
+        lb_info.Size = new System.Drawing.Size(179, 95);
         lb_info.TabIndex = 0;
         lb_info.Text = "Вы вошли как:";
         lb_info.TextAlign = System.Drawing.ContentAlignment.TopCenter;
@@ -202,8 +204,8 @@ partial class ChatLayout
         // 
         BackColor = System.Drawing.SystemColors.ButtonHighlight;
         Controls.Add(p_chat);
-        MinimumSize = new System.Drawing.Size(496, 462);
-        Size = new System.Drawing.Size(496, 462);
+        MinimumSize = new System.Drawing.Size(510, 480);
+        Size = new System.Drawing.Size(510, 480);
         Load += ChatLayout_Load;
         p_chat.ResumeLayout(false);
         p_topBar.ResumeLayout(false);
