@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.IO.Compression;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
@@ -42,109 +43,182 @@ public class ProxyServer
 
     private async Task HandleClient(TcpClient client)
     {
-        using (client)
-        using (NetworkStream clientStream = client.GetStream())
-        using (StreamReader clientReader = new StreamReader(clientStream))
-        using (StreamWriter clientWriter = new StreamWriter(clientStream))
+        
+        NetworkStream clientStream = client.GetStream();
+        
+        // получаем запрос в виде строк
+        string[] requestLines = await RequestLinesAsync(clientStream);
+
+        if (requestLines.Length < 1)
+            return;
+        
+        // получаем данные заголовка
+        string[] requestParams = requestLines[0].Split(" ");
+        
+        // проверяем на количество параметров
+        if (requestParams.Length < 3) return;
+        
+        // формируем параметры
+        string method = requestParams[0];
+        string requestUrl = requestParams[1];
+        string httpVersion = requestParams[2];
+        
+        // создаем полный Uri
+        if (!Uri.TryCreate(requestUrl, UriKind.Absolute, out Uri? url)) return;
+        
+        string host = url.Host;
+        if (string.IsNullOrEmpty(host)) return;
+        // если в черном списке
+        if (_blocker.IsBlocked(host))
         {
-            clientWriter.AutoFlush = true;
+            await SendBlockMessageAsync(clientStream);
+            // отправляем тело
+            Console.WriteLine($"Блокирован доступ к {requestUrl}");
+            return;
+        }
             
-            // получаем header от браузера
-            string? header = await clientReader.ReadLineAsync();
-            
-            // проверка на пустоту
-            if (string.IsNullOrEmpty(header)) return;
-            
-            // распарсиваем заголовок на куски
-            string[] requestParams = header.Split(' ');
-            
-            // проверяем на количество параметров
-            if (requestParams.Length < 3) return;
-            
-            // формируем параметры
-            string method = requestParams[0];
-            string requestUrl = requestParams[1];
-            string httpVersion = requestParams[2];
-            
-            // создаем полный Uri
-            if (!Uri.TryCreate(requestUrl, UriKind.Absolute, out Uri uri)) return;
-            
-            string host = uri.Host;
-            if (string.IsNullOrEmpty(host)) return;
-            // если в черном списке
-            if (_blocker.IsBlocked(host))
-            {
-                // узнаем длину в байтах
-                int contentLength = Encoding.UTF8.GetByteCount(_blocker.ResponseBody);
-                // отправляем заголовок
-                await clientWriter.WriteLineAsync("HTTP/1.1 403 Forbidden");
-                await clientWriter.WriteLineAsync("Content-Type: text/html; charset=utf-8");
-                await clientWriter.WriteLineAsync($"Content-Length: {contentLength}");
-                await clientWriter.WriteLineAsync();
-                await clientWriter.WriteLineAsync(_blocker.ResponseBody);
-                // отправляем тело
-                Console.WriteLine($"Блокирован доступ к {requestUrl}");
-                return;
-            }
-                
-            // получаем остальную информацию 
-            int port = uri.Port;
-            string path = uri.PathAndQuery;
-            
-            try
-            {
-                using (TcpClient server = new TcpClient())
-                {
-                    // подключаемся к удаленном серверу
-                    await server.ConnectAsync(host, port);
+        // получаем остальную информацию запроса
+        int port = url.Port;
+        string path = url.PathAndQuery;
 
-                    using (NetworkStream serverStream = server.GetStream())
-                    using (StreamReader serverReader = new StreamReader(serverStream))
-                    using (StreamWriter serverWriter = new StreamWriter(serverStream))
-                    {
-                        serverWriter.AutoFlush = true;
-                        // отправляем заголовок запроса
-                        await serverWriter.WriteLineAsync($"{method} {path} {httpVersion}");
-                        
-                        // получаем остальную часть от клиента и передаем сразу серверу
-                        string? line = "";
-                        while (!string.IsNullOrEmpty(line = await clientReader.ReadLineAsync()))
-                        {
-                            await serverWriter.WriteLineAsync(line);
-                        }
-                        // записываем пустую строчку для конца запроса
-                        await serverWriter.WriteLineAsync();
-                        
-                        // получаем заголовок от сервера
-                        string? responseLine = await serverReader.ReadLineAsync();
-                        // отправляем клиенту
-                        await clientWriter.WriteLineAsync(responseLine);
-                        
-                        Console.WriteLine($"[{method}] {uri} {responseLine}");
-                        
-                        if (string.IsNullOrEmpty(responseLine)) return;
-                        
-                        while (!string.IsNullOrEmpty(responseLine = await serverReader.ReadLineAsync()))
-                        {
-                            await clientWriter.WriteLineAsync(responseLine);
-                        }
-                        
-                        await clientWriter.WriteLineAsync();
+        try
+        {
+            TcpClient server = new TcpClient();
+            await server.ConnectAsync(host, port);
+            NetworkStream serverStream = server.GetStream();
+            serverStream.ReadTimeout = 1000;
 
-                        // используем потом для прочтения тела
-                        byte[] buffer = new byte[8192];
-                        int bytesRead;
-                        while ((bytesRead = await serverStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                        {
-                            await clientStream.WriteAsync(buffer, 0, bytesRead);
-                        }
-                    }
-                }
-            }
-            catch (Exception e)
+            // производим замену длинного url на короткий
+            requestLines[0] = $"{method} {path} {httpVersion}";
+            // отправляем запрос
+            await SendRequestAsync(serverStream, requestLines);
+
+            // получаем первую строку 
+            byte[] statusLineBytes = await ReceiveStatusLineAsync(serverStream); 
+            string statusLine = Encoding.UTF8.GetString(statusLineBytes);
+            
+            Console.WriteLine($"[{method}] {url} - {statusLine}");
+            
+            // отправляем строку пользователю 
+            await clientStream.WriteAsync(statusLineBytes, 0, statusLineBytes.Length);
+            
+            // переводим остальные строки
+            await TransmitRequestAsync(serverStream, clientStream);
+
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Ошибка: {ex.Message}");
+        }
+        finally
+        {
+            client.Close();
+            client.Dispose();
+        }
+    }
+
+    private async Task<string[]> RequestLinesAsync(NetworkStream stream)
+    {
+        byte[] buffer = new byte[2048];
+        int bytes = 0;
+        // получаем header от браузера
+        bytes = await stream.ReadAsync(buffer, 0, buffer.Length);
+            
+        /*// проверка на пустоту
+        if (bytes == 0) return [];*/
+            
+        // распарсиваем заголовок на куски
+        string requestText = Encoding.UTF8.GetString(buffer, 0, bytes);
+        string[] requestLines = requestText.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+        return requestLines;
+    }
+
+    private async Task SendBlockMessageAsync(NetworkStream stream)
+    {
+        // получаем длину тела в байтах
+        int contentLength = Encoding.UTF8.GetByteCount(_blocker.ResponseBody);
+        // формируем ответ
+        string response = "HTTP/1.1 403 Forbidden\r\n" +
+                          "Content-Type: text/html; charset=utf-8\r\n" +
+                          $"Content-Length: {contentLength}\r\n" +
+                          "\r\n" +
+                          _blocker.ResponseBody;
+        
+        // кодируем в байты ответ
+        byte[] buffer = Encoding.UTF8.GetBytes(response);
+        
+        // отправляем ответ клиенту
+        await stream.WriteAsync(buffer, 0 , buffer.Length);
+    }
+
+    private async Task SendRequestAsync(NetworkStream stream, string[] requestLines)
+    {
+        foreach (var requestLine in requestLines)
+        {
+            byte[] headerBytes = Encoding.UTF8.GetBytes(requestLine + "\r\n");
+            await stream.WriteAsync(headerBytes, 0, headerBytes.Length);
+        }
+        await stream.WriteAsync(Encoding.UTF8.GetBytes("\r\n"), 0, 2);
+    }
+
+    private async Task<string?> TransmitRequestAsync(NetworkStream serverStream, NetworkStream clientStream)
+    {
+        byte[] buffer = new byte[8192];
+        int bytesRead;
+        
+        List<byte> responseLineBytes = new List<byte>(); // Сюда собираем первую строку
+        bool isFirstLineRead = false;
+
+        // Читаем первую строку вручную (до \r\n)
+        while (!isFirstLineRead && (bytesRead = serverStream.Read(buffer, 0, 1)) > 0)
+        {
+            responseLineBytes.Add(buffer[0]);
+
+            // Проверяем конец строки (\r\n)
+            if (responseLineBytes.Count >= 2 && 
+                responseLineBytes[^2] == '\r' && 
+                responseLineBytes[^1] == '\n')
             {
-                Console.WriteLine(e);
+                isFirstLineRead = true;
             }
         }
+
+        byte[] statusLine = responseLineBytes.ToArray();
+        // Преобразуем байты первой строки в строку
+        string responseLine = Encoding.UTF8.GetString(statusLine);
+        await clientStream.WriteAsync(statusLine, 0, statusLine.Length);
+        
+        // Читаем ответ от сервера и отправляем клиенту
+        while ((bytesRead = await serverStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+        {
+            await clientStream.WriteAsync(buffer, 0, bytesRead);
+        }
+        
+        return responseLine;
+    }
+
+    private async Task<byte[]> ReceiveStatusLineAsync(NetworkStream serverStream)
+    {
+        byte[] buffer = new byte[2];
+        
+        List<byte> responseLineBytes = new List<byte>(); // Сюда собираем первую строку
+        bool isFirstLineRead = false;
+
+        // Читаем первую строку вручную (до \r\n)
+        while (!isFirstLineRead && await serverStream.ReadAsync(buffer, 0, 1) > 0)
+        {
+            responseLineBytes.Add(buffer[0]);
+
+            // Проверяем конец строки (\r\n)
+            if (responseLineBytes.Count >= 2 && 
+                responseLineBytes[^2] == '\r' && 
+                responseLineBytes[^1] == '\n')
+            {
+                isFirstLineRead = true;
+            }
+        }
+
+        // Преобразуем байты первой строки ответа в строку
+        return responseLineBytes.ToArray();
     }
 }
