@@ -161,40 +161,16 @@ public class ProxyServer
         await stream.WriteAsync(Encoding.UTF8.GetBytes("\r\n"), 0, 2);
     }
 
-    private async Task<string?> TransmitRequestAsync(NetworkStream serverStream, NetworkStream clientStream)
+    private async Task TransmitRequestAsync(NetworkStream serverStream, NetworkStream clientStream)
     {
         byte[] buffer = new byte[8192];
         int bytesRead;
-        
-        List<byte> responseLineBytes = new List<byte>(); // Сюда собираем первую строку
-        bool isFirstLineRead = false;
-
-        // Читаем первую строку вручную (до \r\n)
-        while (!isFirstLineRead && (bytesRead = serverStream.Read(buffer, 0, 1)) > 0)
-        {
-            responseLineBytes.Add(buffer[0]);
-
-            // Проверяем конец строки (\r\n)
-            if (responseLineBytes.Count >= 2 && 
-                responseLineBytes[^2] == '\r' && 
-                responseLineBytes[^1] == '\n')
-            {
-                isFirstLineRead = true;
-            }
-        }
-
-        byte[] statusLine = responseLineBytes.ToArray();
-        // Преобразуем байты первой строки в строку
-        string responseLine = Encoding.UTF8.GetString(statusLine);
-        await clientStream.WriteAsync(statusLine, 0, statusLine.Length);
         
         // Читаем ответ от сервера и отправляем клиенту
         while ((bytesRead = await serverStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
         {
             await clientStream.WriteAsync(buffer, 0, bytesRead);
         }
-        
-        return responseLine;
     }
 
     private async Task<byte[]> ReceiveStatusLineAsync(NetworkStream serverStream)
