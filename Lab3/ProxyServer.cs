@@ -1,4 +1,5 @@
-﻿using System.IO.Compression;
+﻿using System.Diagnostics;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -8,7 +9,7 @@ namespace Lab3;
 public class ProxyServer
 {
     private readonly Blocker _blocker;
-    private const int Port = 8080;
+    private const int Port = 8052;
     private readonly TcpListener _tcpListener;
 
     public ProxyServer()
@@ -80,10 +81,11 @@ public class ProxyServer
         // получаем остальную информацию запроса
         int port = url.Port;
         string path = url.PathAndQuery;
+        TcpClient server = new TcpClient();
 
         try
         {
-            TcpClient server = new TcpClient();
+
             await server.ConnectAsync(host, port);
             NetworkStream serverStream = server.GetStream();
             serverStream.ReadTimeout = 1000;
@@ -92,13 +94,14 @@ public class ProxyServer
             requestLines[0] = $"{method} {path} {httpVersion}";
             // отправляем запрос
             await SendRequestAsync(serverStream, requestLines);
+            server.Client.Shutdown(SocketShutdown.Send);
 
             // получаем первую строку 
-            byte[] statusLineBytes = await ReceiveStatusLineAsync(serverStream); 
+            byte[] statusLineBytes = await ReceiveStatusLineAsync(serverStream);
             string statusLine = Encoding.UTF8.GetString(statusLineBytes);
-            
+
             Console.WriteLine($"[{method}] {url} - {statusLine}");
-            
+
             // отправляем строку пользователю 
             await clientStream.WriteAsync(statusLineBytes, 0, statusLineBytes.Length);
             
@@ -108,10 +111,14 @@ public class ProxyServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Ошибка: {ex.Message}");
+            Console.WriteLine($"{ex.Message}");
         }
         finally
         {
+            server.Client.Shutdown(SocketShutdown.Both);
+            server.Close();
+            server.Dispose();
+            
             client.Close();
             client.Dispose();
         }
@@ -123,9 +130,6 @@ public class ProxyServer
         int bytes = 0;
         // получаем header от браузера
         bytes = await stream.ReadAsync(buffer, 0, buffer.Length);
-            
-        /*// проверка на пустоту
-        if (bytes == 0) return [];*/
             
         // распарсиваем заголовок на куски
         string requestText = Encoding.UTF8.GetString(buffer, 0, bytes);
@@ -172,6 +176,7 @@ public class ProxyServer
             await clientStream.WriteAsync(buffer, 0, bytesRead);
         }
     }
+
 
     private async Task<byte[]> ReceiveStatusLineAsync(NetworkStream serverStream)
     {
