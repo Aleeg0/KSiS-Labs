@@ -15,7 +15,6 @@ public class ProxyServer
     public ProxyServer()
     {
         _blocker = new Blocker();
-        _blocker.Add("blocked.com");
         _tcpListener = new TcpListener(new IPEndPoint(IPAddress.Any, Port));
     }
 
